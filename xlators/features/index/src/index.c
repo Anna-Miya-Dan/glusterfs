@@ -16,6 +16,7 @@
 #include "options.h"
 #include "glusterfs3-xdr.h"
 #include "syncop.h"
+#include "syscall.h"
 
 #define XATTROP_SUBDIR "xattrop"
 #define BASE_INDICES_HOLDER_SUBDIR "base_indices_holder"
@@ -264,7 +265,7 @@ check_delete_stale_index_file (xlator_t *this, char *filename)
         ret = stat (filepath_under_base_indices_holder, &base_index_st);
         if (ret) {
                 gf_log (THIS->name, GF_LOG_ERROR, "Base index is not created"
-                        "under index/base_indices_holder");
+                        " under index/base_indices_holder");
                 return;
         }
 
@@ -407,7 +408,8 @@ sync_base_indices (void *index_priv)
                     snprintf (base_index_path, PATH_MAX, "%s/%s",
                               base_indices_holder, entry->d_name);
 
-                    ret = link (xattrop_index_path, base_index_path);
+                    ret = sys_link (xattrop_index_path, base_index_path);
+
                     if (ret && errno != EEXIST)
                         goto out;
 
@@ -543,7 +545,8 @@ index_add (xlator_t *this, uuid_t gfid, const char *subdir)
         index_get_index (priv, index);
         make_index_path (priv->index_basepath, subdir,
                          index, index_path, sizeof (index_path));
-        ret = link (index_path, gfid_path);
+
+        ret = sys_link (index_path, gfid_path);
         if (!ret || (errno == EEXIST))  {
                 ret = 0;
                 index_created = 1;
@@ -576,7 +579,7 @@ index_add (xlator_t *this, uuid_t gfid, const char *subdir)
         if (fd >= 0)
                 close (fd);
 
-        ret = link (index_path, gfid_path);
+        ret = sys_link (index_path, gfid_path);
         if (ret && (errno != EEXIST)) {
                 gf_log (this->name, GF_LOG_ERROR, "%s: Not able to "
                         "add to index (%s)", uuid_utoa (gfid),
@@ -590,7 +593,7 @@ index_add (xlator_t *this, uuid_t gfid, const char *subdir)
                  make_index_path (priv->index_basepath,
                                   GF_BASE_INDICES_HOLDER_GFID,
                                   index, base_path, sizeof (base_path));
-                 ret = link (index_path, base_path);
+                 ret = sys_link (index_path, base_path);
                  if (ret)
                          goto out;
         }
@@ -652,22 +655,16 @@ _check_key_is_zero_filled (dict_t *d, char *k, data_t *v,
         return 0;
 }
 
-
 void
-_xattrop_index_action (xlator_t *this, inode_t *inode,  dict_t *xattr)
+_index_action (xlator_t *this, inode_t *inode, gf_boolean_t zero_xattr)
 {
-        gf_boolean_t      zero_xattr = _gf_true;
+        int               ret  = 0;
         index_inode_ctx_t *ctx = NULL;
-        int               ret = 0;
-
-        ret = dict_foreach (xattr, _check_key_is_zero_filled, NULL);
-        if (ret == -1)
-                zero_xattr = _gf_false;
 
         ret = index_inode_ctx_get (inode, this, &ctx);
         if (ret) {
                 gf_log (this->name, GF_LOG_ERROR, "Not able to %s %s -> index",
-                        zero_xattr?"add":"del", uuid_utoa (inode->gfid));
+                        zero_xattr?"del":"add", uuid_utoa (inode->gfid));
                 goto out;
         }
         if (zero_xattr) {
@@ -684,6 +681,19 @@ _xattrop_index_action (xlator_t *this, inode_t *inode,  dict_t *xattr)
                         ctx->state = IN;
         }
 out:
+        return;
+}
+
+void
+_xattrop_index_action (xlator_t *this, inode_t *inode,  dict_t *xattr)
+{
+        gf_boolean_t      zero_xattr = _gf_true;
+        int               ret = 0;
+
+        ret = dict_foreach (xattr, _check_key_is_zero_filled, NULL);
+        if (ret == -1)
+                zero_xattr = _gf_false;
+        _index_action (this, inode, zero_xattr);
         return;
 }
 
@@ -865,6 +875,11 @@ int
 index_xattrop_wrapper (call_frame_t *frame, xlator_t *this, loc_t *loc,
                        gf_xattrop_flags_t optype, dict_t *xattr, dict_t *xdata)
 {
+        //In wind phase bring the gfid into index. This way if the brick crashes
+        //just after posix performs xattrop before _cbk reaches index xlator
+        //we will still have the gfid in index.
+        _index_action (this, frame->local, _gf_false);
+
         STACK_WIND (frame, index_xattrop_cbk, FIRST_CHILD (this),
                     FIRST_CHILD (this)->fops->xattrop, loc, optype, xattr,
                     xdata);
@@ -875,6 +890,10 @@ int
 index_fxattrop_wrapper (call_frame_t *frame, xlator_t *this, fd_t *fd,
                         gf_xattrop_flags_t optype, dict_t *xattr, dict_t *xdata)
 {
+        //In wind phase bring the gfid into index. This way if the brick crashes
+        //just after posix performs xattrop before _cbk reaches index xlator
+        //we will still have the gfid in index.
+        _index_action (this, frame->local, _gf_false);
         STACK_WIND (frame, index_fxattrop_cbk, FIRST_CHILD (this),
                     FIRST_CHILD (this)->fops->fxattrop, fd, optype, xattr,
                     xdata);

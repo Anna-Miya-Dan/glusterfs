@@ -792,6 +792,7 @@ posix_handle_pair (xlator_t *this, const char *real_path,
                                          value->len, flags);
 
                 if (sys_ret < 0) {
+                        ret = -errno;
                         if (errno == ENOTSUP) {
                                 GF_LOG_OCCASIONALLY(gf_xattr_enotsup_log,
                                                     this->name,GF_LOG_WARNING,
@@ -823,7 +824,6 @@ posix_handle_pair (xlator_t *this, const char *real_path,
 #endif /* DARWIN */
                         }
 
-                        ret = -errno;
                         goto out;
                 }
         }
@@ -838,10 +838,16 @@ posix_fhandle_pair (xlator_t *this, int fd,
         int sys_ret = -1;
         int ret     = 0;
 
+        if (XATTR_IS_PATHINFO (key)) {
+                ret = -EACCES;
+                goto out;
+        }
+
         sys_ret = sys_fsetxattr (fd, key, value->data,
                                  value->len, flags);
 
         if (sys_ret < 0) {
+                ret = -errno;
                 if (errno == ENOTSUP) {
                         GF_LOG_OCCASIONALLY(gf_xattr_enotsup_log,
                                             this->name,GF_LOG_WARNING,
@@ -868,7 +874,6 @@ posix_fhandle_pair (xlator_t *this, int fd,
 #endif /* DARWIN */
                 }
 
-                ret = -errno;
                 goto out;
         }
 

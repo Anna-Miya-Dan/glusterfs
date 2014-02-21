@@ -26,6 +26,7 @@ _init ()
     cmd_line=$(echo "@sbindir@/glusterfs");
 
     # check whether getfattr exists
+    export PATH
     getfattr=$(which getfattr 2>/dev/null);
     if [ $? -ne 0 ]; then
         echo "WARNING: getfattr not found, certain checks will be skipped.."
@@ -149,6 +150,9 @@ start_glusterfs ()
 
     if [ -n "$worm" ]; then
         cmd_line=$(echo "$cmd_line --worm");
+    fi
+    if [ -n "$volfile_max_fetch_attempts" ]; then
+       cmd_line=$(echo "$cmd_line --volfile-max-fetch-attempts=$volfile_max_fetch_attempts")
     fi
 
     if [ -n "$fopen_keep_cache" ]; then
@@ -422,6 +426,9 @@ with_options()
             ;;
         "backupvolfile-server")
             backupvolfile_server=$value
+            ;;
+        "fetch-attempts")
+            volfile_max_fetch_attempts=$value
             ;;
         "congestion-threshold")
             cong_threshold=$value

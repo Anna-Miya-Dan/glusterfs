@@ -1295,6 +1295,159 @@ glusterd_check_gsync_running (glusterd_volinfo_t *volinfo, gf_boolean_t *flag)
         return 0;
 }
 
+/*
+ * is_geo_rep_active:
+ *      This function reads the state_file and sets is_active to 1 if the
+ *      monitor status is neither "Stopped" or "Not Started"
+ *
+ * RETURN VALUE:
+ *       0: On successful read of state_file.
+ *      -1: error.
+ */
+
+static int
+is_geo_rep_active (glusterd_volinfo_t *volinfo, char *slave,
+                   char *conf_path, int *is_active)
+{
+        dict_t                 *confd                      = NULL;
+        char                   *statefile                  = NULL;
+        char                   *master                     = NULL;
+        char                    monitor_status[PATH_MAX]   = "";
+        int                     ret                        = -1;
+        xlator_t               *this                       = NULL;
+
+        this = THIS;
+        GF_ASSERT (this);
+
+        master = volinfo->volname;
+
+        confd = dict_new ();
+        if (!confd) {
+                gf_log ("", GF_LOG_ERROR, "Not able to create dict.");
+                goto out;
+        }
+
+        ret = glusterd_gsync_get_config (master, slave, conf_path,
+                                         confd);
+        if (ret) {
+                gf_log ("", GF_LOG_ERROR, "Unable to get configuration data "
+                        "for %s(master), %s(slave)", master, slave);
+                ret = -1;
+                goto out;
+        }
+
+        ret = dict_get_param (confd, "state_file", &statefile);
+        if (ret) {
+                gf_log ("", GF_LOG_ERROR, "Unable to get state_file's name "
+                        "for %s(master), %s(slave). Please check gsync "
+                        "config file.", master, slave);
+                ret = -1;
+                goto out;
+        }
+
+        ret = glusterd_gsync_read_frm_status (statefile, monitor_status,
+                                              sizeof (monitor_status));
+        if (ret <= 0) {
+                gf_log ("", GF_LOG_ERROR, "Unable to read the status "
+                        "file for %s(master), %s(slave)", master, slave);
+                strncpy (monitor_status, "defunct", sizeof (monitor_status));
+        }
+
+        if ((!strcmp(monitor_status, "Stopped")) ||
+            (!strcmp(monitor_status, "Not Started"))) {
+                *is_active = 0;
+        } else {
+                *is_active = 1;
+        }
+        ret = 0;
+out:
+        if (confd)
+                dict_destroy (confd);
+        return ret;
+}
+
+/*
+ * _get_slave_status:
+ *      Called for each slave in the volume from dict_foreach.
+ *      It calls is_geo_rep_active to get the monitor status.
+ *
+ * RETURN VALUE:
+ *      0: On successful read of state_file from is_geo_rep_active.
+ *         When it is found geo-rep is already active from previous calls.
+ *         When there is no slave.
+ *     -1: On error.
+ */
+
+int
+_get_slave_status (dict_t *dict, char *key, data_t *value, void *data)
+{
+        gsync_status_param_t          *param               = NULL;
+        char                          *slave               = NULL;
+        char                          *slave_ip            = NULL;
+        char                          *slave_vol           = NULL;
+        char                          *errmsg              = NULL;
+        char                           conf_path[PATH_MAX] = "";
+        int                            ret                 = -1;
+        glusterd_conf_t               *priv                = NULL;
+        xlator_t                      *this                = NULL;
+
+        param = (gsync_status_param_t *)data;
+
+        GF_ASSERT (param);
+        GF_ASSERT (param->volinfo);
+
+        if (param->is_active) {
+                ret = 0;
+                goto out;
+        }
+
+        this = THIS;
+        GF_ASSERT (this);
+
+        if (this)
+                priv = this->private;
+        if (priv == NULL) {
+                gf_log ("", GF_LOG_ERROR, "priv of glusterd not present");
+                goto out;
+        }
+
+        slave = strchr(value->data, ':');
+        if (!slave) {
+                ret = 0;
+                goto out;
+        }
+        slave++;
+
+        ret = glusterd_get_slave_info (slave, &slave_ip, &slave_vol, &errmsg);
+        if (ret) {
+                if (errmsg)
+                        gf_log ("", GF_LOG_ERROR, "Unable to fetch "
+                                "slave details. Error: %s", errmsg);
+                else
+                        gf_log ("", GF_LOG_ERROR,
+                                "Unable to fetch slave details.");
+                ret = -1;
+                goto out;
+        }
+
+        ret = snprintf (conf_path, sizeof(conf_path) - 1,
+                        "%s/"GEOREP"/%s_%s_%s/gsyncd.conf",
+                        priv->workdir, param->volinfo->volname,
+                        slave_ip, slave_vol);
+        if (ret < 0) {
+                gf_log ("", GF_LOG_ERROR, "Unable to assign conf_path.");
+                ret = -1;
+                goto out;
+        }
+        conf_path[ret] = '\0';
+
+        ret = is_geo_rep_active (param->volinfo,slave, conf_path,
+                                 &param->is_active);
+out:
+        GF_FREE(errmsg);
+        return ret;
+}
+
 static int
 glusterd_op_verify_gsync_running (glusterd_volinfo_t *volinfo,
                                   char *slave, char *conf_path,
@@ -2462,7 +2615,7 @@ glusterd_gsync_configure (glusterd_volinfo_t *volinfo, char *slave,
                 goto out;
         }
 
-        if (!strcmp (op_name, "state_file")) {
+        if ((!strcmp (op_name, "state_file")) && (op_value)) {
 
                 ret = lstat (op_value, &stbuf);
                 if (ret) {
@@ -2743,7 +2896,7 @@ glusterd_read_status_file (glusterd_volinfo_t *volinfo, char *slave,
         char                   *master                     = NULL;
         char                    tmp[1024]                  = "";
         char                    sts_val_name[1024]         = "";
-        char                    monitor_status[PATH_MAX]   = "";
+        char                    monitor_status[NAME_MAX]   = "";
         char                   *statefile                  = NULL;
         char                   *socketfile                 = NULL;
         dict_t                 *confd                      = NULL;

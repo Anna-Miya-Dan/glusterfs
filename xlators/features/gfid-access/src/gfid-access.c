@@ -252,7 +252,7 @@ err:
 }
 
 static int32_t
-ga_fill_tmp_loc (loc_t *loc, xlator_t *this, char *gfid,
+ga_fill_tmp_loc (loc_t *loc, xlator_t *this, uuid_t gfid,
                  char *bname, dict_t *xdata, loc_t *new_loc)
 {
         int       ret    = -1;
@@ -263,6 +263,8 @@ ga_fill_tmp_loc (loc_t *loc, xlator_t *this, char *gfid,
         ret = inode_ctx_get (loc->inode, this, &value);
         if (!ret) {
                 parent = (void *)value;
+                if (uuid_is_null (parent->gfid))
+                        parent = loc->inode;
         }
 
         /* parent itself should be looked up */
@@ -421,15 +423,20 @@ ga_new_entry (call_frame_t *frame, xlator_t *this, loc_t *loc, data_t *data,
         call_frame_t      *new_frame = NULL;
         mode_t             mode      = 0;
         ga_local_t        *local     = NULL;
+        uuid_t             gfid      = {0,};
 
         args = ga_newfile_parse_args (this, data);
         if (!args)
                 goto out;
 
+        ret = uuid_parse (args->gfid, gfid);
+        if (ret)
+                goto out;
+
         if (!xdata)
                 xdata = dict_new ();
 
-        ret = ga_fill_tmp_loc (loc, this, args->gfid,
+        ret = ga_fill_tmp_loc (loc, this, gfid,
                                args->bname, xdata, &tmp_loc);
         if (ret)
                 goto out;
@@ -485,15 +492,20 @@ ga_heal_entry (call_frame_t *frame, xlator_t *this, loc_t *loc, data_t *data,
         ga_heal_args_t *args      = NULL;
         loc_t           tmp_loc   = {0,};
         call_frame_t   *new_frame = NULL;
+        uuid_t          gfid      = {0,};
 
         args = ga_heal_parse_args (this, data);
         if (!args)
                 goto out;
 
+        ret = uuid_parse (args->gfid, gfid);
+        if (ret)
+                goto out;
+
         if (!xdata)
                 xdata = dict_new ();
 
-        ret = ga_fill_tmp_loc (loc, this, args->gfid, args->bname,
+        ret = ga_fill_tmp_loc (loc, this, gfid, args->bname,
                                xdata, &tmp_loc);
         if (ret)
                 goto out;
@@ -617,7 +629,8 @@ ga_virtual_lookup_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                         /* the inode is not present in itable, ie, the actual
                            path is not yet looked up. Use the current inode
                            itself for now */
-                        inode_ref (inode);
+
+                        inode_link (inode, NULL, NULL, buf);
                 } else {
                         /* 'inode_ref()' has been done in inode_find() */
                         inode = true_inode;
@@ -708,8 +721,30 @@ ga_lookup (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xdata)
         /* if its revalidate, and inode is not of type directory,
            proceed with 'wind' */
         if (loc->inode && loc->inode->ia_type &&
-            !IA_ISDIR (loc->inode->ia_type))
+            !IA_ISDIR (loc->inode->ia_type)) {
+
+                /* a revalidate on ".gfid/<dentry>" is possible, check for it */
+                if (((loc->parent &&
+                      __is_gfid_access_dir (loc->parent->gfid)) ||
+                     __is_gfid_access_dir (loc->pargfid))) {
+
+                        /* here, just send 'loc->gfid' and 'loc->inode' */
+                        tmp_loc.inode = inode_ref (loc->inode);
+                        uuid_copy (tmp_loc.gfid, loc->inode->gfid);
+
+                        STACK_WIND (frame, default_lookup_cbk,
+                                    FIRST_CHILD(this),
+                                    FIRST_CHILD(this)->fops->lookup,
+                                    &tmp_loc, xdata);
+
+                        inode_unref (tmp_loc.inode);
+
+                        return 0;
+                }
+
+                /* not something to bother, continue the flow */
                 goto wind;
+        }
 
         priv = this->private;
 
@@ -729,8 +764,26 @@ ga_lookup (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xdata)
         /* now, check if the lookup() is on an existing entry,
            but on gfid-path */
         if (!((loc->parent && __is_gfid_access_dir (loc->parent->gfid)) ||
-              __is_gfid_access_dir (loc->pargfid)))
-                goto wind;
+              __is_gfid_access_dir (loc->pargfid))) {
+                if (!loc->parent)
+                        goto wind;
+
+                ret = inode_ctx_get (loc->parent, this, &value);
+                if (ret)
+                        goto wind;
+
+                inode = (inode_t *) value;
+
+                ret = loc_copy_overload_parent (&tmp_loc, loc, inode);
+                if (ret)
+                        goto err;
+
+                STACK_WIND (frame, ga_lookup_cbk, FIRST_CHILD (this),
+                            FIRST_CHILD (this)->fops->lookup, &tmp_loc, xdata);
+
+                loc_wipe (&tmp_loc);
+                return 0;
+        }
 
         /* make sure the 'basename' is actually a 'canonical-gfid',
            otherwise, return error */

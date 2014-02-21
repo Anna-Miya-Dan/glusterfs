@@ -1329,12 +1329,14 @@ glusterd_store_global_info (xlator_t *this)
 
         ret = gf_store_rename_tmppath (handle);
 out:
-        if (ret && (handle->fd > 0))
-                gf_store_unlink_tmppath (handle);
+        if (handle) {
+                if (ret && (handle->fd > 0))
+                        gf_store_unlink_tmppath (handle);
 
-        if (handle->fd > 0) {
-                close (handle->fd);
-                handle->fd = 0;
+                if (handle->fd > 0) {
+                        close (handle->fd);
+                        handle->fd = 0;
+                }
         }
 
         if (uuid_str)
@@ -2580,8 +2582,10 @@ glusterd_store_retrieve_peers (xlator_t *this)
                         ret = gf_store_iter_get_next (iter, &key, &value,
                                                       &op_errno);
                 }
-                if (op_errno != GD_STORE_EOF)
+                if (op_errno != GD_STORE_EOF) {
+                        GF_FREE(hostname);
                         goto out;
+                }
 
                 (void) gf_store_iter_destroy (iter);
 

@@ -87,6 +87,7 @@
 #define GF_XATTR_GET_REAL_FILENAME_KEY "glusterfs.get_real_filename:"
 #define GF_XATTR_USER_PATHINFO_KEY   "glusterfs.pathinfo"
 #define QUOTA_LIMIT_KEY "trusted.glusterfs.quota.limit-set"
+#define VIRTUAL_QUOTA_XATTR_CLEANUP_KEY "glusterfs.quota-xattr-cleanup"
 
 #define GF_READDIR_SKIP_DIRS       "readdir-filter-directories"
 
@@ -455,7 +456,6 @@ struct _glusterfs_ctx {
 
         int                 daemon_pipe[2];
 
-        struct client_disconnect *client_disconnect;
         struct clienttable *clienttable;
 };
 typedef struct _glusterfs_ctx glusterfs_ctx_t;

@@ -967,6 +967,15 @@ nfs_init_state (xlator_t *this)
                 goto free_foppool;
         }
 
+        ret = rpcsvc_set_outstanding_rpc_limit (nfs->rpcsvc,
+                                  this->options,
+                                  RPCSVC_DEF_NFS_OUTSTANDING_RPC_LIMIT);
+        if (ret < 0) {
+                gf_log (GF_NFS, GF_LOG_ERROR,
+                        "Failed to configure outstanding-rpc-limit");
+                goto free_foppool;
+        }
+
         nfs->register_portmap = rpcsvc_register_portmap_enabled (nfs->rpcsvc);
 
         this->private = (void *)nfs;
@@ -1210,6 +1219,17 @@ reconfigure (xlator_t *this, dict_t *options)
                         "rpcsvc reconfigure options failed");
                 return (-1);
         }
+
+        /* Reconfigure rpc.outstanding-rpc-limit */
+        ret = rpcsvc_set_outstanding_rpc_limit (nfs->rpcsvc,
+                                       options,
+                                       RPCSVC_DEF_NFS_OUTSTANDING_RPC_LIMIT);
+        if (ret < 0) {
+                gf_log (GF_NFS, GF_LOG_ERROR,
+                        "Failed to reconfigure outstanding-rpc-limit");
+                return (-1);
+        }
+
         regpmap = rpcsvc_register_portmap_enabled(nfs->rpcsvc);
         if (nfs->register_portmap != regpmap) {
                 nfs->register_portmap = regpmap;
@@ -1604,8 +1624,8 @@ struct volume_options options[] = {
           .type = GF_OPTION_TYPE_BOOL,
           .default_value = "on",
           .description = "Disable or enable the AUTH_UNIX authentication type."
-                         "Must always be enabled for better interoperability."
-                         "However, can be disabled if needed. Enabled by"
+                         "Must always be enabled for better interoperability. "
+                         "However, can be disabled if needed. Enabled by "
                          "default"
         },
         { .key  = {"rpc-auth.auth-null"},
@@ -1621,8 +1641,8 @@ struct volume_options options[] = {
           .description = "Disable or enable the AUTH_UNIX authentication type "
                          "for a particular exported volume overriding defaults"
                          " and general setting for AUTH_UNIX scheme. Must "
-                         "always be enabled for better interoperability."
-                         "However, can be disabled if needed. Enabled by"
+                         "always be enabled for better interoperability. "
+                         "However, can be disabled if needed. Enabled by "
                          "default."
         },
         { .key  = {"rpc-auth.auth-unix.*.allow"},
@@ -1631,8 +1651,8 @@ struct volume_options options[] = {
           .description = "Disable or enable the AUTH_UNIX authentication type "
                          "for a particular exported volume overriding defaults"
                          " and general setting for AUTH_UNIX scheme. Must "
-                         "always be enabled for better interoperability."
-                         "However, can be disabled if needed. Enabled by"
+                         "always be enabled for better interoperability. "
+                         "However, can be disabled if needed. Enabled by "
                          "default."
         },
         { .key  = {"rpc-auth.auth-null.*"},
@@ -1673,7 +1693,7 @@ struct volume_options options[] = {
           .default_value = "none",
           .description = "Reject a comma separated list of addresses and/or"
                          " hostnames from connecting to the server. By default,"
-                         " all connections are allowed. This allows users to"
+                         " all connections are allowed. This allows users to "
                          "define a rule for a specific exported volume."
         },
         { .key  = {"rpc-auth.ports.insecure"},
@@ -1741,7 +1761,7 @@ struct volume_options options[] = {
           .type = GF_OPTION_TYPE_INT,
           .min  = RPCSVC_MIN_OUTSTANDING_RPC_LIMIT,
           .max  = RPCSVC_MAX_OUTSTANDING_RPC_LIMIT,
-          .default_value = TOSTRING(RPCSVC_DEFAULT_OUTSTANDING_RPC_LIMIT),
+          .default_value = TOSTRING(RPCSVC_DEF_NFS_OUTSTANDING_RPC_LIMIT),
           .description = "Parameter to throttle the number of incoming RPC "
                          "requests from a client. 0 means no limit (can "
                          "potentially run out of memory)"
@@ -1770,8 +1790,8 @@ struct volume_options options[] = {
         { .key  = {"nfs.*.disable"},
           .type = GF_OPTION_TYPE_BOOL,
           .default_value = "false",
-          .description = "This option is used to start or stop NFS server"
-                         "for individual volume."
+          .description = "This option is used to start or stop the NFS server "
+                         "for individual volumes."
         },
 
         { .key  = {"nfs.nlm"},

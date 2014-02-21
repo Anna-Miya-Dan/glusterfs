@@ -142,6 +142,9 @@ static struct argp_option gf_options[] = {
          "Mount the filesystem with POSIX ACL support"},
         {"selinux", ARGP_SELINUX_KEY, 0, 0,
          "Enable SELinux label (extened attributes) support on inodes"},
+        {"volfile-max-fetch-attempts", ARGP_VOLFILE_MAX_FETCH_ATTEMPTS, "0",
+         OPTION_HIDDEN, "Maximum number of attempts to fetch the volfile"},
+
 #ifdef GF_LINUX_HOST_OS
         {"aux-gfid-mount", ARGP_AUX_GFID_MOUNT_KEY, 0, 0,
          "Enable access to filesystem through gfid directly"},
@@ -733,6 +736,7 @@ parse_opts (int key, char *arg, struct argp_state *state)
         char         *tmp_str       = NULL;
         char         *port_str      = NULL;
         struct passwd *pw           = NULL;
+        int           ret           = 0;
 
         cmd_args = state->input;
 
@@ -878,6 +882,9 @@ parse_opts (int key, char *arg, struct argp_state *state)
         case ARGP_DEBUG_KEY:
                 cmd_args->debug_mode = ENABLE_DEBUG_MODE;
                 break;
+        case ARGP_VOLFILE_MAX_FETCH_ATTEMPTS:
+                cmd_args->max_connect_attempts = 1;
+                break;
 
         case ARGP_DIRECT_IO_MODE_KEY:
                 if (!arg)
@@ -908,8 +915,8 @@ parse_opts (int key, char *arg, struct argp_state *state)
         case ARGP_NEGATIVE_TIMEOUT_KEY:
                 d = 0.0;
 
-                gf_string2double (arg, &d);
-                if (!(d < 0.0)) {
+                ret = gf_string2double (arg, &d);
+                if ((ret == 0) && !(d < 0.0)) {
                         cmd_args->fuse_negative_timeout = d;
                         break;
                 }
@@ -1476,6 +1483,16 @@ parse_cmdline (int argc, char *argv[], glusterfs_ctx_t *ctx)
                 }
         }
 
+        /*
+           This option was made obsolete but parsing it for backward
+           compatibility with third party applications
+         */
+        if (cmd_args->max_connect_attempts) {
+                gf_log ("glusterfs", GF_LOG_WARNING,
+                        "obsolete option '--volfile-max-fetch-attempts"
+                        " or fetch-attempts' was provided");
+        }
+
 #ifdef GF_DARWIN_HOST_OS
         if (cmd_args->mount_point)
                 cmd_args->mac_compat = GF_OPTION_DEFERRED;
@@ -1503,26 +1520,6 @@ glusterfs_pidfile_setup (glusterfs_ctx_t *ctx)
         if (!pidfp) {
                 gf_log ("glusterfsd", GF_LOG_ERROR,
                         "pidfile %s error (%s)",
-                        cmd_args->pid_file, strerror (errno));
-                goto out;
-        }
-
-        ret = lockf (fileno (pidfp), F_TLOCK, 0);
-        if (ret) {
-                gf_log ("glusterfsd", GF_LOG_ERROR,
-                        "pidfile %s lock error (%s)",
-                        cmd_args->pid_file, strerror (errno));
-                goto out;
-        }
-
-        gf_log ("glusterfsd", GF_LOG_TRACE,
-                "pidfile %s lock acquired",
-                cmd_args->pid_file);
-
-        ret = lockf (fileno (pidfp), F_ULOCK, 0);
-        if (ret) {
-                gf_log ("glusterfsd", GF_LOG_ERROR,
-                        "pidfile %s unlock error (%s)",
                         cmd_args->pid_file, strerror (errno));
                 goto out;
         }

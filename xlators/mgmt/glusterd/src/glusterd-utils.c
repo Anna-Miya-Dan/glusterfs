@@ -1295,23 +1295,16 @@ glusterd_brick_connect (glusterd_volinfo_t  *volinfo,
                                            glusterd_brick_rpc_notify,
                                            brickid);
                 synclock_lock (&priv->big_lock);
-                if (ret)
+                if (ret) {
+                        GF_FREE (brickid);
                         goto out;
+                }
                 brickinfo->rpc = rpc;
         }
 out:
+
         gf_log ("", GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
-}
-
-/* Caller should ensure that brick process is not running*/
-static void
-_reap_brick_process (char *pidfile, char *brickpath)
-{
-        unlink (pidfile);
-        /* Brick process is not running and pmap may have an entry for it.*/
-        pmap_registry_remove (THIS, 0, brickpath,
-                              GF_PMAP_PORT_BRICKSERVER, NULL);
 }
 
 static int
@@ -1367,8 +1360,6 @@ glusterd_volume_start_glusterfs (glusterd_volinfo_t  *volinfo,
         GLUSTERD_GET_BRICK_PIDFILE (pidfile, volinfo, brickinfo, priv);
         if (gf_is_service_running (pidfile, NULL))
                 goto connect;
-
-        _reap_brick_process (pidfile, brickinfo->path);
 
         port = brickinfo->port;
         if (!port)
@@ -3135,7 +3126,8 @@ glusterd_import_volinfo (dict_t *vols, int count,
         if (ret)
                 gf_log (THIS->name, GF_LOG_INFO,
                         "peer is possibly old version");
-
+        new_volinfo->subvol_count = new_volinfo->brick_count/
+                                    glusterd_get_dist_leaf_count (new_volinfo);
         memset (key, 0, sizeof (key));
         snprintf (key, sizeof (key), "volume%d.ckusm", count);
         ret = dict_get_uint32 (vols, key, &new_volinfo->cksum);
@@ -3961,7 +3953,7 @@ glusterd_nodesvc_disconnect (char *server)
 }
 
 int32_t
-glusterd_nodesvc_start (char *server)
+glusterd_nodesvc_start (char *server, gf_boolean_t wait)
 {
         int32_t                 ret                        = -1;
         xlator_t               *this                       = NULL;
@@ -4047,7 +4039,16 @@ glusterd_nodesvc_start (char *server)
         runner_log (&runner, "", GF_LOG_DEBUG,
                     "Starting the nfs/glustershd services");
 
-        ret = runner_run_nowait (&runner);
+        if (!wait) {
+                ret = runner_run_nowait (&runner);
+        } else {
+                synclock_unlock (&priv->big_lock);
+                {
+                        ret = runner_run (&runner);
+                }
+                synclock_lock (&priv->big_lock);
+        }
+
         if (ret == 0) {
                 glusterd_nodesvc_connect (server, sockfpath);
         }
@@ -4058,19 +4059,19 @@ out:
 int
 glusterd_nfs_server_start ()
 {
-        return glusterd_nodesvc_start ("nfs");
+        return glusterd_nodesvc_start ("nfs", _gf_false);
 }
 
 int
 glusterd_shd_start ()
 {
-        return glusterd_nodesvc_start ("glustershd");
+        return glusterd_nodesvc_start ("glustershd", _gf_false);
 }
 
 int
 glusterd_quotad_start ()
 {
-        return glusterd_nodesvc_start ("quotad");
+        return glusterd_nodesvc_start ("quotad", _gf_true);
 }
 
 gf_boolean_t
@@ -4801,8 +4802,8 @@ _local_gsyncd_start (dict_t *this, char *key, data_t *value, void *data)
                               uuid_str, NULL);
 
 out:
-        if (path_list)
-                GF_FREE (path_list);
+        GF_FREE (path_list);
+        GF_FREE (op_errstr);
 
         return ret;
 }
@@ -6948,7 +6949,7 @@ glusterd_volume_defrag_restart (glusterd_volinfo_t *volinfo, char *op_errstr,
         case GF_DEFRAG_STATUS_STARTED:
                 GLUSTERD_GET_DEFRAG_PID_FILE(pidfile, volinfo, priv);
                 if (gf_is_service_running (pidfile, &pid)) {
-                        glusterd_rebalance_rpc_create (volinfo);
+                        glusterd_rebalance_rpc_create (volinfo, _gf_true);
                         break;
                 }
         case GF_DEFRAG_STATUS_NOT_STARTED:

@@ -885,7 +885,6 @@ posix_opendir (call_frame_t *frame, xlator_t *this,
         VALIDATE_OR_GOTO (frame, out);
         VALIDATE_OR_GOTO (this, out);
         VALIDATE_OR_GOTO (loc, out);
-        VALIDATE_OR_GOTO (loc->path, out);
         VALIDATE_OR_GOTO (fd, out);
 
         SET_FS_ID (frame->root->uid, frame->root->gid);
@@ -1930,18 +1929,9 @@ posix_link (call_frame_t *frame, xlator_t *this,
                 goto out;
         }
 
-#ifdef HAVE_LINKAT
-	/*
-	 * On most systems (Linux being the notable exception), link(2)
-	 * first resolves symlinks. If the target is a directory or
-	 * is nonexistent, it will fail. linkat(2) operates on the
-	 * symlink instead of its target when the AT_SYMLINK_FOLLOW
-	 * flag is not supplied.
-	 */
-        op_ret = linkat (AT_FDCWD, real_oldpath, AT_FDCWD, real_newpath, 0);
-#else
-        op_ret = link (real_oldpath, real_newpath);
-#endif
+
+        op_ret = sys_link (real_oldpath, real_newpath);
+
         if (op_ret == -1) {
                 op_errno = errno;
                 gf_log (this->name, GF_LOG_ERROR,
@@ -2950,8 +2940,10 @@ posix_setxattr (call_frame_t *frame, xlator_t *this,
         filler.flags = flags;
         op_ret = dict_foreach (dict, _handle_setxattr_keyvalue_pair,
                                &filler);
-        if (op_ret < 0)
+        if (op_ret < 0) {
                 op_errno = -op_ret;
+                op_ret = -1;
+        }
 
 out:
         SET_TO_OLD_FS_ID ();
@@ -3916,8 +3908,10 @@ posix_fsetxattr (call_frame_t *frame, xlator_t *this,
         filler.flags = flags;
         op_ret = dict_foreach (dict, _handle_fsetxattr_keyvalue_pair,
                                &filler);
-        if (op_ret < 0)
+        if (op_ret < 0) {
                 op_errno = -op_ret;
+                op_ret = -1;
+        }
 
 out:
         SET_TO_OLD_FS_ID ();

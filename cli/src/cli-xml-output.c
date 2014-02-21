@@ -251,6 +251,11 @@ cli_xml_output_vol_status_common (xmlTextWriterPtr writer, dict_t *dict,
         }
         *node_present = _gf_true;
 
+        /* <node>
+         * will be closed in the calling function cli_xml_output_vol_status()*/
+        ret = xmlTextWriterStartElement (writer, (xmlChar *)"node");
+        XML_RET_CHECK_AND_GOTO (ret, out);
+
         ret = xmlTextWriterWriteFormatElement (writer, (xmlChar *)"hostname",
                                                "%s", hostname);
         XML_RET_CHECK_AND_GOTO (ret, out);
@@ -1662,11 +1667,6 @@ cli_xml_output_vol_status (cli_local_t *local, dict_t *dict)
         index_max = brick_index_max + other_count;
 
         for (i = 0; i <= index_max; i++) {
-                /* <node> */
-                ret = xmlTextWriterStartElement (local->writer,
-                                                 (xmlChar *)"node");
-                XML_RET_CHECK_AND_GOTO (ret, out);
-
                 ret = cli_xml_output_vol_status_common (local->writer, dict, i,
                                                         &online, &node_present);
                 if (ret) {
@@ -1732,7 +1732,8 @@ cli_xml_output_vol_status (cli_local_t *local, dict_t *dict)
                         break;
 
                 }
-                /* </node> */
+
+                /* </node>  was opened in cli_xml_output_vol_status_common()*/
                 ret = xmlTextWriterEndElement (local->writer);
                 XML_RET_CHECK_AND_GOTO (ret, out);
         }
@@ -2228,11 +2229,13 @@ cli_xml_output_vol_profile (dict_t *dict, int op_ret, int op_errno,
         xmlDocPtr               doc = NULL;
         char                    *volname = NULL;
         int                     op = GF_CLI_STATS_NONE;
+        int                     info_op = GF_CLI_INFO_NONE;
         int                     brick_count = 0;
         char                    *brick_name = NULL;
         int                     interval = 0;
         char                    key[1024] = {0,};
         int                     i = 0;
+        int                     stats_cleared = 0;
 
         ret = cli_begin_xml_output (&writer, &doc);
         if (ret)
@@ -2260,7 +2263,7 @@ cli_xml_output_vol_profile (dict_t *dict, int op_ret, int op_errno,
                                                "%d", op);
         XML_RET_CHECK_AND_GOTO (ret, out);
 
-        if (op < GF_CLI_STATS_INFO || GF_CLI_STATS_INFO_CUMULATIVE < op)
+        if (GF_CLI_STATS_INFO != op)
                 goto cont;
 
         ret = dict_get_int32 (dict, "count", &brick_count);
@@ -2269,6 +2272,10 @@ cli_xml_output_vol_profile (dict_t *dict, int op_ret, int op_errno,
         ret = xmlTextWriterWriteFormatElement (writer, (xmlChar *)"brickCount",
                                                "%d", brick_count);
         XML_RET_CHECK_AND_GOTO (ret, out);
+
+        ret = dict_get_int32 (dict, "info-op", &info_op);
+        if (ret)
+                goto out;
 
         while (i < brick_count) {
                 i++;
@@ -2285,23 +2292,37 @@ cli_xml_output_vol_profile (dict_t *dict, int op_ret, int op_errno,
                         (writer, (xmlChar *)"brickName", "%s", brick_name);
                 XML_RET_CHECK_AND_GOTO (ret, out);
 
-                snprintf (key, sizeof (key), "%d-cumulative", i);
-                ret = dict_get_int32 (dict, key, &interval);
-                if (ret == 0) {
-                        ret = cli_xml_output_vol_profile_stats
-                                (writer, dict, i, interval);
+                if (GF_CLI_INFO_CLEAR == info_op) {
+                        snprintf (key, sizeof (key), "%d-stats-cleared", i);
+                        ret = dict_get_int32 (dict, key, &stats_cleared);
                         if (ret)
                                 goto out;
-                }
 
-                memset (key, 0, sizeof (key));
-                snprintf (key, sizeof (key), "%d-interval", i);
-                ret = dict_get_int32 (dict, key, &interval);
-                if (ret == 0) {
-                        ret = cli_xml_output_vol_profile_stats
-                                (writer, dict, i, interval);
+                        ret = xmlTextWriterWriteFormatElement
+                                (writer, (xmlChar *)"clearStats", "%s", 
+                                stats_cleared ? "Cleared stats." :
+                                                 "Failed to clear stats.");
                         if (ret)
                                 goto out;
+                } else {
+                        snprintf (key, sizeof (key), "%d-cumulative", i);
+                        ret = dict_get_int32 (dict, key, &interval);
+                        if (ret == 0) {
+                                ret = cli_xml_output_vol_profile_stats
+                                        (writer, dict, i, interval);
+                                if (ret)
+                                        goto out;
+                        }
+
+                        memset (key, 0, sizeof (key));
+                        snprintf (key, sizeof (key), "%d-interval", i);
+                        ret = dict_get_int32 (dict, key, &interval);
+                        if (ret == 0) {
+                                ret = cli_xml_output_vol_profile_stats
+                                        (writer, dict, i, interval);
+                                if (ret)
+                                        goto out;
+                        }
                 }
 
                 /* </brick> */
@@ -2712,6 +2733,16 @@ cli_xml_output_vol_info (cli_local_t *local, dict_t *dict)
                                 goto out;
                         ret = xmlTextWriterWriteFormatString
                                 (local->writer, "%s", brick);
+                        XML_RET_CHECK_AND_GOTO (ret, out);
+
+                        ret = xmlTextWriterWriteFormatElement
+                                (local->writer, (xmlChar *)"name", "%s",
+                                 brick);
+                        XML_RET_CHECK_AND_GOTO (ret, out);
+
+                        ret = xmlTextWriterWriteFormatElement
+                                (local->writer, (xmlChar *)"hostUuid", "%s",
+                                 uuid);
                         XML_RET_CHECK_AND_GOTO (ret, out);
 
                         /* </brick> */

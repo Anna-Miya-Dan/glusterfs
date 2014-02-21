@@ -2265,7 +2265,7 @@ server_finodelk_resume (call_frame_t *frame, xlator_t *bound_xl)
         GF_UNUSED int   ret   = -1;
         server_state_t *state = NULL;
 
-        gf_log (bound_xl->name, GF_LOG_WARNING, "frame %p, xlator %p",
+        gf_log (bound_xl->name, GF_LOG_DEBUG, "frame %p, xlator %p",
                 frame, bound_xl);
 
         state = CALL_STATE (frame);
@@ -2298,7 +2298,7 @@ server_inodelk_resume (call_frame_t *frame, xlator_t *bound_xl)
         GF_UNUSED int   ret   = -1;
         server_state_t *state = NULL;
 
-        gf_log (bound_xl->name, GF_LOG_WARNING, "frame %p, xlator %p",
+        gf_log (bound_xl->name, GF_LOG_DEBUG, "frame %p, xlator %p",
                 frame, bound_xl);
 
         state = CALL_STATE (frame);
@@ -3735,6 +3735,7 @@ server3_3_writev (rpcsvc_request_t *req)
         state->resolve.type  = RESOLVE_MUST;
         state->resolve.fd_no = args.fd;
         state->offset        = args.offset;
+        state->size          = args.size;
         state->flags         = args.flag;
         state->iobref        = iobref_ref (req->iobref);
         memcpy (state->resolve.gfid, args.gfid, 16);

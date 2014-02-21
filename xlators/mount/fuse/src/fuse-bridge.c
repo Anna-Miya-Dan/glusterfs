@@ -3374,8 +3374,6 @@ fuse_getxattr (xlator_t *this, fuse_in_header_t *finh, void *msg)
                 }
         }
 
-        GET_STATE (this, finh, state);
-
         fuse_resolve_inode_init (state, &state->resolve, finh->nodeid);
 
         rv = fuse_flip_xattr_ns (priv, name, &newkey);
@@ -4028,12 +4026,14 @@ fuse_nameless_lookup (xlator_t *xl, uuid_t gfid, loc_t *loc)
         inode_t     *linked_inode = NULL;
 
         if ((loc == NULL) || (xl == NULL)) {
+                ret = -EINVAL;
                 goto out;
         }
 
         if (loc->inode == NULL) {
                 loc->inode = inode_new (xl->itable);
                 if (loc->inode == NULL) {
+                        ret = -ENOMEM;
                         goto out;
                 }
         }
@@ -4042,13 +4042,13 @@ fuse_nameless_lookup (xlator_t *xl, uuid_t gfid, loc_t *loc)
 
         xattr_req = dict_new ();
         if (xattr_req == NULL) {
+                ret = -ENOMEM;
                 goto out;
         }
 
         ret = syncop_lookup (xl, loc, xattr_req, &iatt, NULL, NULL);
-        if (ret < 0) {
+        if (ret < 0)
                 goto out;
-        }
 
         linked_inode = inode_link (loc->inode, NULL, NULL, &iatt);
         inode_unref (loc->inode);
@@ -4097,9 +4097,10 @@ fuse_migrate_fd_open (xlator_t *this, fd_t *basefd, fd_t *oldfd,
                                 "name-less lookup of gfid (%s) failed (%s)"
                                 "(old-subvolume:%s-%d new-subvolume:%s-%d)",
                                 uuid_utoa (basefd->inode->gfid),
-                                strerror (errno),
+                                strerror (-ret),
                                 old_subvol->name, old_subvol->graph->id,
                                 new_subvol->name, new_subvol->graph->id);
+                        ret = -1;
                         goto out;
                 }
 
@@ -4117,6 +4118,7 @@ fuse_migrate_fd_open (xlator_t *this, fd_t *basefd, fd_t *oldfd,
                         uuid_utoa (loc.inode->gfid),
                         old_subvol->name, old_subvol->graph->id,
                         new_subvol->name, new_subvol->graph->id);
+                ret = -1;
                 goto out;
         }
 
@@ -4140,9 +4142,10 @@ fuse_migrate_fd_open (xlator_t *this, fd_t *basefd, fd_t *oldfd,
                 gf_log ("glusterfs-fuse", GF_LOG_WARNING,
                         "open on basefd (ptr:%p inode-gfid:%s) failed (%s)"
                         "(old-subvolume:%s-%d new-subvolume:%s-%d)", basefd,
-                        uuid_utoa (basefd->inode->gfid), strerror (errno),
+                        uuid_utoa (basefd->inode->gfid), strerror (-ret),
                         old_subvol->name, old_subvol->graph->id,
                         new_subvol->name, new_subvol->graph->id);
+                ret = -1;
                 goto out;
         }
 
@@ -4210,6 +4213,7 @@ fuse_migrate_locks (xlator_t *this, fd_t *basefd, fd_t *oldfd,
 			oldfd, newfd, uuid_utoa (newfd->inode->gfid),
 			old_subvol->name, old_subvol->graph->id,
 			new_subvol->name, new_subvol->graph->id);
+                ret = -1;
                 goto out;
         }
 
@@ -4235,6 +4239,7 @@ fuse_migrate_locks (xlator_t *this, fd_t *basefd, fd_t *oldfd,
 			oldfd, newfd, uuid_utoa (newfd->inode->gfid),
 			old_subvol->name, old_subvol->graph->id,
 			new_subvol->name, new_subvol->graph->id);
+                ret = -1;
                 goto out;
         }
 
@@ -4302,10 +4307,11 @@ fuse_migrate_fd (xlator_t *this, fd_t *basefd, xlator_t *old_subvol,
                                 "syncop_fsync failed (%s) on fd (%p)"
                                 "(basefd:%p basefd-inode.gfid:%s) "
                                 "(old-subvolume:%s-%d new-subvolume:%s-%d)",
-                                strerror (errno), oldfd, basefd,
+                                strerror (-ret), oldfd, basefd,
                                 uuid_utoa (basefd->inode->gfid),
                                 old_subvol->name, old_subvol->graph->id,
                                 new_subvol->name, new_subvol->graph->id);
+                        ret = -1;
                 }
         } else {
                 gf_log ("glusterfs-fuse", GF_LOG_WARNING,
